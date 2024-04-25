@@ -121,53 +121,68 @@ int handle_request(const int *server_fd, const char *directory) {
 
     } else if (strncmp(request.path, "/files", sizeof("/files") - 1) == 0) {
         char *file_name = request.path + sizeof("/files/") - 1;
-        // if the file doesn't exist, send 404
         char file_path[1024];
         sprintf(file_path, "%s%s", directory, file_name);
         printf("File path: %s\n", file_path);
-        FILE *file = fopen(file_path, "r");
-        if (file == NULL) {
+
+        if (strcmp(request.method, "GET") == 0) {
+            FILE *file = fopen(file_path, "r");
+            // if the file doesn't exist, send 404
+            if (file == NULL) {
+                char response[] =
+                    "HTTP/1.1 404 Not Found\r\n"
+                    "Content-Length: 0\r\n\r\n";
+                send(client_socket_fd, response, strlen(response), 0);
+                return 0;
+            }
+            // file exists, send the content
+            char response_header_prefix[] =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: ";
+
+            // cal the file size
+            fseek(file, 0, SEEK_END);
+            long file_size = ftell(file);
+            rewind(file);
+
+            // read the file content to a char list
+            char file_content[file_size + 1];
+            fread(file_content, sizeof(char), file_size, file);
+            file_content[file_size] = '\0';
+            unsigned int file_content_len = strlen(file_content);
+
+            // close file
+            fclose(file);
+
+            // make response
+            char response[4096];
+            sprintf(
+                response,
+                "%s%u\r\n\r\n%s",
+                response_header_prefix,
+                file_content_len,
+                file_content);
+            send(client_socket_fd, response, strlen(response), 0);
+        } else {
+            char *file_content = strrchr(raw_request, '\r') + 2;
+
+            FILE *file = fopen(file_path, "w");
+            fwrite(file_content, sizeof(char), strlen(file_content), file);
+            fclose(file);
+
             char response[] =
-                "HTTP/1.1 404 Not Found\r\n"
+                "HTTP/1.1 201 Created\r\n"
                 "Content-Length: 0\r\n\r\n";
             send(client_socket_fd, response, strlen(response), 0);
-            return 0;
         }
-        // file exists, send the content
-        char response_header_prefix[] =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/octet-stream\r\n"
-            "Content-Length: ";
-
-        // cal the file size
-        fseek(file, 0, SEEK_END);
-        long file_size = ftell(file);
-        rewind(file);
-
-        // read the file content to a char list
-        char file_content[file_size + 1];
-        fread(file_content, sizeof(char), file_size, file);
-        file_content[file_size] = '\0';
-        unsigned int file_content_len = strlen(file_content);
-
-        // close file
-        fclose(file);
-
-        // make response
-        char response[4096];
-        sprintf(
-            response,
-            "%s%u\r\n\r\n%s",
-            response_header_prefix,
-            file_content_len,
-            file_content);
-        send(client_socket_fd, response, strlen(response), 0);
     } else {
         char response[] =
             "HTTP/1.1 404 Not Found\r\n"
             "Content-Length: 0\r\n\r\n";
         send(client_socket_fd, response, strlen(response), 0);
     }
+
     return 1;
 }
 
